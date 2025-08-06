@@ -78,7 +78,8 @@ class SimpleCPU {
         this.dataMemory = dataMemory;
         this.regA = new DelayLineMemory(WORD_SIZE);
         this.regB = new DelayLineMemory(WORD_SIZE);
-        this.regS = new DelayLineMemory(WORD_SIZE);
+        this.regS = new DelayLineMemory(WORD_SIZE); // scratch register #1
+        this.regT = new DelayLineMemory(WORD_SIZE); // scratch register #2
 
         this.OPCODES = {
             'NOP': 0b00000000, // No Operation
@@ -103,8 +104,12 @@ class SimpleCPU {
             'LDB': 0b00010110, // Load Data Memory to Reg B
             'LDP': 0b00010111, // Load Program Memory to Reg A
             'STP': 0b00011000, // Store Reg A to Program Memory
-            'LEA': 0b00011001, // Load Immediate in the address part of reg A
+            'LEA': 0b00011001, // Load Immediate in the address part of Reg A
             'LEB': 0b00011010, // Load Immediate in the address part of Reg B
+            'AND': 0b00011011, // Reg A AND Reg B and Store in Reg A
+            'ORR': 0b00011100, // Reg A OR Reg B and Store in Reg A
+            'XOR': 0b00011101, // Reg A XOR Reg B and Store in Reg A
+            'MUL': 0b00011111, // Multiply A by B and store in A
             'HLT': 0b00001111, // Halt the CPU
         };
 
@@ -123,6 +128,8 @@ class SimpleCPU {
         this.memory.clear();
         this.regA.clear();
         this.regB.clear();
+        this.regS.clear();
+        this.regT.clear();
     }
     
     step() {
@@ -301,6 +308,8 @@ class SimpleCPU {
                 console.log("      -> SHL (Shift Left, 8 ticks)");
                 // To shift left, we read each bit and write the previous bit.
                 // The first bit written is a 0.
+                // Because of the specific bit ordering, 
+                // the SHL operation will shift all bits to the left, halving the value.
                 this.regA.write(0); // Shift in a 0
                 this.regA.tick();
                 console.log(` Reg A after shift in: ${this.regA._memory.join('')}`);
@@ -311,12 +320,13 @@ class SimpleCPU {
                 // To shift right, we need to reverse the order of bits.
                 // We'll read all bits, then write them back in shifted order.
                 // Use regS as a temporary storage.
+                // Because of the specific bit ordering,
+                // the SHR operation will shift all bits to the right, doubling the value.
                 this.regS.clear();
                 for (let i = 0; i < WORD_SIZE; i++) {
                     this.regS.write(this.regA.tick());
                     this.regS.tick();
                 }
-
                 this.regA.clear();
                 this.regA.write(0); // Shift in a 0
                 this.regA.tick();
@@ -325,6 +335,89 @@ class SimpleCPU {
                     this.regA.tick();
                 }
                 console.log(` Reg A after SHR: ${this.regA._memory.join('')}`);
+                break;
+
+            case this.OPCODES.AND:
+                console.log("      -> AND (Bitwise AND between Reg A and Reg B, 8 ticks)");
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    const bitA = this.regA._memory[0];
+                    const bitB = this.regB._memory[0];
+                    this.regA.write(bitA & bitB);
+                    this.regA.tick();
+                    this.regB.tick();
+                }
+                console.log(` Reg A after AND: ${this.regA._memory.join('')}`);
+                break;
+
+            case this.OPCODES.ORR:
+                console.log("      -> ORR (Bitwise OR between Reg A and Reg B, 8 ticks)");
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    const bitA = this.regA._memory[0];
+                    const bitB = this.regB._memory[0];
+                    this.regA.write(bitA | bitB);
+                    this.regA.tick();
+                    this.regB.tick();
+                }
+                console.log(` Reg A after ORR: ${this.regA._memory.join('')}`);
+                break;
+
+            case this.OPCODES.XOR:
+                console.log("      -> XOR (Bitwise XOR between Reg A and Reg B, 8 ticks)");
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    const bitA = this.regA._memory[0];
+                    const bitB = this.regB._memory[0];
+                    this.regA.write(bitA ^ bitB);
+                    this.regA.tick();
+                    this.regB.tick();
+                }
+                console.log(` Reg A after XOR: ${this.regA._memory.join('')}`);
+                break;
+            
+            case this.OPCODES.MUL:
+                console.log("      -> MUL (A * B), result in A");
+                // 1. INITIALIZATION
+                // Copy the multiplicand from Reg A into the internal scratch register S.
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    this.regS.write(this.regA.tick());
+                    this.regS.tick();
+                }
+
+                // Reg B already contains the multiplier.
+                // Clear Reg A to serve as the product accumulator.
+                this.regA.clear();
+            
+                // 2. MAIN LOOP
+                // Loop once for each bit of the multiplier.
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    this.regA.tick();
+                    //console.log(` Reg A after rotation in: ${this.regA._memory.join('')}`);
+
+                    // 2b. Check the Most Significant Bit (MSB) of the multiplier in Reg B.
+                    // If the MSB is 1, add the multiplicand (from Reg S) to the product (Reg A).
+                    if (this.regB._memory[0] === 1) {                        
+                        // This is a custom ADD logic (A = A + S) that does NOT consume Reg S.
+                        let carry = 0;
+                        for (let j = 0; j < WORD_SIZE; j++) {
+                            const bitA = this.regA._memory[0];
+                            const bitS = this.regS._memory[0]; // Read from the static copy
+                            const sum = bitA + bitS + carry;
+                            this.regA.write(sum % 2);
+                            carry = sum > 1 ? 1 : 0;
+                            this.regA.tick(); // Rotate Reg A to complete the serial addition
+                            this.regS.tick(); // Rotate Reg S to complete the serial addition
+                            this.totalTicks++;
+                        }
+                        //console.log(`  Reg A after addition: ${this.regA._memory.join('')}`);
+                    }
+
+                    // 2c. Shift the multiplier (Reg B) one bit to the left.
+                    this.regB.write(0);
+                    this.regB.tick();
+                }
+
+                // The final 40-bit product is now in Reg A.
+                this.regA.tick(); // Final tick to ensure Reg A is updated
+                console.log(` Reg A after MUL: ${this.regA._memory.join('')}`);
                 break;
 
             case this.OPCODES.RND:
@@ -370,13 +463,12 @@ class SimpleCPU {
                     const sum = bitA + bitB + carry;
                     this.regA.write(sum % 2);
                     carry = sum > 1 ? 1 : 0;
-                    //console.log(` bits ${i}: A: ${this.regA._memory[0]}, B: ${this.regB._memory[0]}, c: ${carry}, s: ${sum}`);
                     this.regA.tick();
                     this.regB.tick();
                 }
                 console.log(` Reg A after ADD: ${this.regA._memory.join('')}`);
                 break;
-
+            
             case this.OPCODES.COL: // *** NEW OPCODE LOGIC ***
                 console.log("      -> COL (Collate)");
                 // Phase 1: Fetch value from data memory into scratch register S
@@ -605,7 +697,7 @@ function runSimulation(program) {
                 operand = BigInt(parseInt(operandStr));
             }
             instructionWord = (opcode << BigInt(WORD_SIZE - 8)) | operand;
-        } else if (['STO', 'LDA', 'STC', 'COL'].includes(op)) {
+        } else if (['STO', 'STB', 'LDA', 'LDB', 'STC', 'COL'].includes(op)) {
             operand = BigInt(parts[1] ? parseInt(parts[1]) : 0);
             word = BigInt(parts[2] ? parseInt(parts[2]) : 0);
             const combinedAddress = (operand << 4n) | word;
@@ -669,50 +761,15 @@ function runSimulation(program) {
 
 // Program with a label for an infinite loop
 const program = `
-    ; --- Wheeler Jump Demonstration ---
-        ; Goal: Call a subroutine that adds 42 to the value in Reg A.
-        ; The subroutine will use the Wheeler Jump to return.
+    ; Goal: Calculate 9 * 5 = 45.
 
-        ; --- Main Program ---
-        LAI, 100               ; Load 100 into Register A to start.
-        STO, 0, 2              ; Store Reg A to temp memory [0,2] for subroutine use.
-        LEB, RETURN_HERE       ; Load the ABSOLUTE ADDRESS of our return point into Reg B.
-        
-        ; Store return address from B into A, which is the convention for the call
-        STB, 0, 0              ; Store B to temp memory
-        LDA, 0, 0              ; Load it back to A
-        
-        JMP, ADD_42_SUB        ; Call the subroutine.
+    LBI, 121                 ; Load multiplier into Reg B.
+    LAI, 6                 ; Load multiplicand into Reg A.
 
-    RETURN_HERE:
-        PRA                    ; Upon return, print the result. Should be 142.
-        HLT                    ; Halt.
+    MUL                    ; A = A * B. The CPU handles all the complex steps.
 
-        ; --- Subroutine: ADD_42_SUB ---
-        ; Expects the return address in Register A.
-    ADD_42_SUB:
-        STO, 0, 1              ; Save the return address (from A) into temp memory [0,1].
-        
-        ; Now, construct the return instruction.
-        LDP, JUMP_TEMPLATE     ; Load the 'JMP 0' instruction into Reg A.
-        LDB, 0, 1              ; Load the return address from temp memory into Reg B.
-        ADD                    ; Reg A = (JMP 0 opcode) + (return address). A now holds 'JMP RETURN_HERE'.
-        
-        STP, SUB_JUMP_SLOT     ; *** THE WHEELER JUMP ***
-                               ; Overwrite the subroutine's own final instruction.
-
-        ; --- Actual work of the subroutine ---
-        LDA, 0, 2              ; Load original value (100) back into A
-        LBI, 42                ; Load 42 into B
-        ADD                    ; A = A + B (100 + 42)
-        STO, 0, 2              ; Store result (142) in temp memory
-        
-    SUB_JUMP_SLOT:
-        JMPA, 0                 ; This instruction will be modified to become 'JMP RETURN_HERE'.
-
-        ; --- Data / Template for the subroutine ---
-    JUMP_TEMPLATE:
-        JMPA, 0                 ; A template instruction the subroutine can use to build its return jump.
+    PRA                    ; Print the result from Reg A.
+    HLT
 `;
 
 runSimulation(program);
