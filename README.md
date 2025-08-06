@@ -1,53 +1,151 @@
-# DL Memory
+# Simple CPU Simulator (DL_Mem)
 
-## **1. Architecture**
+This document provides a comprehensive overview and manual for the `cpu2m3.js` script, a simulator for a simple, vintage-style CPU. The architecture is inspired by early computers like the EDVAC and demonstrates concepts like delay-line memory, a single-address instruction set, and advanced programming techniques such as self-modifying code for subroutine calls.
 
-* **40-bit Word Size**: The `WORD_SIZE` constant has been increased from 8 to 40. All registers (`regA`, `regB`, `regS`) and memory words are now 40 bits long.
-* **Program Memory**: The program memory (256W) is separated from the data memory.
-* **Data Memory**: 16 banks of 16W of external memory
-* **Data alignment**: BigEndian
-* **Instruction Format**: Despite the larger word size, the instruction format retains a familiar structure. An instruction is a 40-bit word where:
-    * The **Opcode** occupies the 8 most significant bits.
-    * The **Operand** space consists of the remaining 32 bits. This provides a large range for immediate values or memory addresses.
+The simulation is written in Javascript and is designed to be run from a Node.js environment. It includes a two-pass assembler that can handle labels, making the assembly code more readable and maintainable.
 
-## **2. The Assembler and Instruction Set**
+## Key Features
 
-The built-in assembler, located within the `runSimulation` function, has been updated to handle the new architecture and instructions. It correctly constructs the 40-bit instruction words by shifting the 8-bit opcode to the correct position and combining it with the operands.
+  * **Delay-Line Memory Simulation:** Accurately models the rotational latency of historic delay-line memory, where accessing a specific word requires waiting for it to "circulate" to the read/write head.
+  * **Banked Data Memory:** Features a separate, banked memory system for data storage, distinct from the main program memory.
+  * **Rich Instruction Set:** Implements a variety of instructions for arithmetic (`ADD`, `NEG`), data transfer (`LDA`, `STO`), logic (`SHL`, `SHR`), and control flow (`JMP`, `JZA`).
+  * **Two-Pass Assembler:** The simulator first reads the assembly program to map all labels to their corresponding memory addresses before assembling the final machine code. This allows for forward-references in jumps and data loads.
+  * **Wheeler Jump Implementation:** The example program demonstrates the "Wheeler Jump," a classic technique where a subroutine modifies its own final instruction to return to the caller.
+  * **Detailed Logging:** The console output provides a tick-by-tick trace of the CPU's state, including program counter (PC) value, instruction register (IR) contents, and register states, making it an excellent tool for learning and debugging.
 
-| Mnemonic | Opcode | Description | Operand Format |
-| :--- | :--- | :--- | :--- |
-| `LAI value` | `0b00000001` | **Load A Immediate**: Loads a value into register A. | `value` (up to 32 bits) |
-| `LBI value` | `0b00000010` | **Load B Immediate**: Loads a value into register B. | `value` (up to 32 bits) |
-| `ADD` | `0b00000011` | **Add**: Adds register B to register A. The result is in A. | None |
-| `PRA` | `0b00000100` | **Print A**: Prints the value of register A. | None |
-| `NEG` | `0b00000101` | **Negate**: Negates the value of register B using two's complement. | None |
-| `STO bank, word` | `0b00000110` | **Store A**: Saves the value of register A to data memory. | `bank` (4 bits), `word` (4 bits) |
-| `LDA bank, word` | `0b00000111` | **Load A**: Loads a value from data memory into register A. | `bank` (4 bits), `word` (4 bits) |
-| `SHL` | `0b00001000` | **Shift Left A**: Performs a logical left shift on register A. | None |
-| `SHR` | `0b00001001` | **Shift Right A**: Performs a logical right shift on register A. | None |
-| `HLT` | `0b00001111` | **Halt**: Stops the program's execution. | None |
+-----
 
-## **3. Execution Logic (`fetchAndExecute`)**
+## How to Run the Simulation
 
-* **Fetch**: The CPU reads a full 40 bits from the main `DelayLineMemory` to fetch one instruction.
-* **Decode**: The fetched 40-bit `BigInt` is parsed to extract the 8-bit opcode and the 32-bit operand.
-* **Execute**: The logic for each instruction now operates on 40-bit data. The new shift instructions are of particular interest:
-    * `SHL` (Shift Left): This instruction is implemented very efficiently. By writing a `0` to the register and then performing a single `tick()`, it uses the natural behavior of the delay line to shift all bits one position to the left and introduce a zero at the least significant bit position.
-    * `SHR` (Shift Right): A right shift is more complex for a simple delay line. The CPU uses the internal scratch register (`regS`) to first read and temporarily store all bits from `regA`. It then clears `regA`, shifts in a `0`, and writes the bits from `regS` back into `regA`, effectively reversing their order to simulate a right shift. This demonstrates a clever workaround for a hardware limitation.
-    * `PRA` (Print A): The logic for printing a signed number appears to contain a bug or an artifact from the previous 8-bit version. It checks the 8th bit (`valA & 0x80`) to determine if the number is negative, which is incorrect for a 40-bit value. For small positive numbers, this will work, but it will fail to correctly print large or negative 40-bit numbers.
+To run the simulation, you need to have **Node.js** installed on your system.
 
-## **4. Analysis of the Example Program**
+1.  Save the code as `cpu2m3.js`.
+2.  Open your terminal or command prompt.
+3.  Navigate to the directory where you saved the file.
+4.  Run the script using the following command:
+    ```bash
+    node cpu2m3.js
+    ```
 
-The example program provided in `runSimulation` demonstrates the use of the new instructions.
+The simulator will start, assemble the hardcoded program, and begin execution, printing detailed status updates to the console.
 
-1.  `LAI, 20` / `LBI, 7`: Loads 20 into `regA` and 7 into `regB`.
-2.  `NEG`: Negates `regB`, making it -7.
-3.  `ADD`: Adds `regB` to `regA`, resulting in `A = 13`.
-4.  `STO, 0, 1`: Stores the value `13` into data memory at bank 0, word 1.
-5.  `LAI, 99` / `STO, 0, 2`: Loads `99` into `regA` and stores it at bank 0, word 2.
-6.  `LDA, 0, 1` / `PRA`: Loads `13` back into `regA` and prints it. **Output: `13`**.
-7.  `LDA, 0, 2`: Loads `99` back into `regA`.
-8.  `SHL`: Shifts `regA` left by one bit. The value `99` (`0b1100011`) becomes `49` (`0b11000110`). The shift moves regardless the endiannes
-9.  `PRA`: Prints the new value of `regA`. **Output: `198`**.
-10. `HLT`: Halts the simulation.
+-----
 
+## CPU Architecture
+
+The simulated CPU has a simple architecture reminiscent of early computing machinery.
+
+### Memory
+
+The simulation uses two distinct memory systems.
+
+  * **Main (Program) Memory:** A single `DelayLineMemory` instance with a size of **10240 bits** (`MEMORY_SIZE`). This is organized into 256 words of 40 bits each (`WORD_SIZE`). Both instructions and data can be stored here. Accessing any word requires waiting for it to align with the read/write head, which is a core part of the simulation's timing.
+  * **Data Memory:** A `MemorySystem` composed of **16 banks**, with each bank containing **16 words** (40 bits each). This memory is intended for general-purpose data storage and is accessed via instructions like `STO` (Store) and `LDA` (Load).
+
+### Registers
+
+The CPU contains a few 40-bit registers, which are also implemented as delay-line memories.
+
+  * `regA`: The primary accumulator. It is used for arithmetic operations and as a source/destination for data transfers.
+  * `regB`: A secondary register, often used to hold the second operand for arithmetic operations like `ADD`.
+  * `regS`: An internal scratchpad register used by the CPU to perform complex instructions like `SHR` (Shift Right) and `COL` (Collate). It is not directly accessible by the programmer.
+  * `ir` (Instruction Register): Holds the current 40-bit instruction being executed.
+  * `pc` (Program Counter): Holds the memory address of the next instruction to be fetched.
+  * `baseAddress`: Used by relative jump instructions (`JMP`, `JNA`, `JZA`) to calculate the absolute jump target.
+
+-----
+
+## Assembly Language and Instruction Set
+
+The simulator assembles a program written in a simple assembly language. An instruction consists of a mnemonic and, optionally, one or more operands.
+
+### Syntax and Labels
+
+The assembler supports labels to make writing programs easier. A label is a name followed by a colon (`:`) that marks a specific line of code.
+
+**Example:**
+
+```assembly
+; This is a label
+MY_LABEL:
+    LAI, 10      ; Load 10 into Register A
+    JMP, MY_LABEL ; Jump back to the line marked by MY_LABEL
+```
+
+### Addressing Modes
+
+  * **Immediate:** The operand is a literal value (e.g., `LAI, 100`).
+  * **Direct/Absolute:** The operand is a fixed memory address (e.g., `JMPA, 245`).
+  * **Relative:** The operand is an offset from the `baseAddress` register. This is used for relocatable code (e.g., `JMP, 5`).
+  * **Data Memory:** Operands for `STO` and `LDA` are specified as `bank, word` (e.g., `STO, 0, 1` stores Reg A into bank 0, word 1).
+
+### Instruction Set (ISA)
+
+The table below lists all the instructions supported by the CPU. The opcode is an 8-bit value.
+
+| Mnemonic | Opcode (binary) | Description |
+| :--- | :--- | :--- |
+| `NOP` | `00000000` | No Operation. |
+| `LAI` | `00000001` | **L**oad **A** **I**mmediate: `regA = operand`. |
+| `LBI` | `00000010` | **L**oad **B** **I**mmediate: `regB = operand`. |
+| `ADD` | `00000011` | **Add**: `regA = regA + regB`. |
+| `PRA` | `00000100` | **P**rint **R**egister **A**: Prints the signed integer value of `regA`. |
+| `NEG` | `00000101` | **Neg**ate: `regB = -regB` (Two's Complement). |
+| `STO` | `00000110` | **Sto**re **A**: `dataMemory[bank,word] = regA`. |
+| `LDA` | `00000111` | **L**oa**d** **A**: `regA = dataMemory[bank,word]`. |
+| `SHL` | `00001000` | **Sh**ift **L**eft `regA` by 1 bit. |
+| `SHR` | `00001001` | **Sh**ift **R**ight `regA` by 1 bit. |
+| `RND` | `00001010` | **R**ou**nd** `regA`: Clears the N least significant bits of `regA`. |
+| `MLA` | `00001011` | **M**u**l**tiply and **A**dd: `regA = regA + regB` for N loops. |
+| `STC` | `00010000` | **St**ore and **C**lear: `dataMemory[bank,word] = regA`, then `regA = 0`. |
+| `JMP` | `00010001` | **J**u**mp** (Relative): `pc = baseAddress + operand`. |
+| `JMPA`| `00011011` | **J**u**mp** **A**bsolute: `pc = operand`. |
+| `JZA` | `00010010` | **J**ump if **Z**ero **A**: Jumps (relative) if `regA` is zero. |
+| `JNA` | `00010011` | **J**ump if **N**egative **A**: Jumps (relative) if `regA` is negative (MSB is 1). |
+| `COL` | `00010100` | **Col**late: `regA = regA + (dataMemory[bank,word] AND regB)`. |
+| `STB` | `00010101` | **St**ore **B**: `dataMemory[bank,word] = regB`. |
+| `LDB` | `00010110` | **L**oa**d** **B**: `regB = dataMemory[bank,word]`. |
+| `LDP` | `00010111` | **L**oad **P**rogram Memory: `regA = programMemory[address]`. |
+| `STP` | `00011000` | **St**ore to **P**rogram Memory: `programMemory[address] = regA`. |
+| `LEA` | `00011001` | **L**oad **E**ffective **A**ddress to **A**: `regA = address`. |
+| `LEB` | `00011010` | **L**oad **E**ffective **A**ddress to **B**: `regB = address`. |
+| `HLT` | `00001111` | **Halt**: Stops the CPU. |
+
+-----
+
+## The Wheeler Jump Explained
+
+The included sample program is a demonstration of the **Wheeler Jump**, a method for handling subroutine returns that was developed by David Wheeler for the Cambridge EDSAC computer. Since the CPU lacks a modern stack for storing return addresses, the subroutine must manually construct and modify its own return instruction.
+
+Here is a step-by-step breakdown of how the sample program uses this technique to call a subroutine that adds 42 to a number.
+
+1.  **Setup in Main Program:**
+
+      * `LAI, 100`: `regA` is loaded with the initial value of 100.
+      * `LEB, RETURN_HERE`: The *absolute address* of the `RETURN_HERE` label is loaded into `regB`. This is where the subroutine needs to jump back to.
+      * `STB, 0, 0` and `LDA, 0, 0`: The return address is passed to the subroutine via `regA`, which was a common convention.
+      * `JMP, ADD_42_SUB`: The program calls the subroutine.
+
+2.  **Execution in the Subroutine (`ADD_42_SUB`):**
+
+      * `STO, 0, 1`: The subroutine first saves the return address (which is in `regA`) into temporary data memory at `[0,1]`.
+      * `LDP, JUMP_TEMPLATE`: It loads a template instruction (`JMPA, 0`) from memory into `regA`.
+      * `LDB, 0, 1`: It loads the saved return address from `[0,1]` into `regB`.
+      * `ADD`: It adds `regA` and `regB`. The result is the opcode for `JMPA` combined with the `RETURN_HERE` address. `regA` now holds a fully formed instruction: `JMPA, RETURN_HERE`.
+
+3.  **The "Wheeler Jump" Moment:**
+
+      * `STP, SUB_JUMP_SLOT`: This is the crucial step. The `STP` (Store to Program Memory) instruction takes the `JMPA, RETURN_HERE` instruction from `regA` and writes it into the program's own memory, overwriting the `JMPA, 0` placeholder at the `SUB_JUMP_SLOT` label.
+
+4.  **Subroutine Work and Return:**
+
+      * The subroutine proceeds with its actual task: it loads the original value (100), adds 42, and stores the result.
+      * It then reaches the `SUB_JUMP_SLOT` instruction. Because of the previous `STP` operation, this instruction is no longer `JMPA, 0`; it is now `JMPA, RETURN_HERE`.
+      * Executing this modified instruction causes the CPU to jump back to the `RETURN_HERE` label in the main program.
+
+5.  **Conclusion:**
+
+      * `PRA`: The main program prints the value in `regA`, which is now 142.
+      * `HLT`: The simulation halts.
+
+This technique of self-modifying code was essential for implementing fundamental programming structures on early computer architectures that lacked more advanced hardware features.
