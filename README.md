@@ -2,7 +2,9 @@
 
 ## **1. Architecture**
 
-* **40-bit Word Size**: The `WORD_SIZE` constant has been increased from 8 to 40. This transforms the machine from a simple 8-bit CPU into a more complex 40-bit one. All registers (`regA`, `regB`, `regS`) and memory words are now 40 bits long.
+* **40-bit Word Size**: The `WORD_SIZE` constant has been increased from 8 to 40. All registers (`regA`, `regB`, `regS`) and memory words are now 40 bits long.
+* **Program Memory**: The program memory (256W) is separated from the data memory.
+* **Data Memory**: 16 banks of 16W of external memory
 * **Instruction Format**: Despite the larger word size, the instruction format retains a familiar structure. An instruction is a 40-bit word where:
     * The **Opcode** occupies the 8 most significant bits.
     * The **Operand** space consists of the remaining 32 bits. This provides a large range for immediate values or memory addresses.
