@@ -1,13 +1,13 @@
 # DL Memory
 
-#### **1. Architecture**
+## **1. Architecture**
 
 * **40-bit Word Size**: The `WORD_SIZE` constant has been increased from 8 to 40. This transforms the machine from a simple 8-bit CPU into a more complex 40-bit one. All registers (`regA`, `regB`, `regS`) and memory words are now 40 bits long.
 * **Instruction Format**: Despite the larger word size, the instruction format retains a familiar structure. An instruction is a 40-bit word where:
     * The **Opcode** occupies the 8 most significant bits.
     * The **Operand** space consists of the remaining 32 bits. This provides a large range for immediate values or memory addresses.
 
-#### **2. The Assembler and Instruction Set**
+## **2. The Assembler and Instruction Set**
 
 The built-in assembler, located within the `runSimulation` function, has been updated to handle the new architecture and instructions. It correctly constructs the 40-bit instruction words by shifting the 8-bit opcode to the correct position and combining it with the operands.
 
@@ -24,7 +24,7 @@ The built-in assembler, located within the `runSimulation` function, has been up
 | `SHR` | `0b00001001` | **Shift Right A**: Performs a logical right shift on register A. | None |
 | `HLT` | `0b00001111` | **Halt**: Stops the program's execution. | None |
 
-#### **3. Execution Logic (`fetchAndExecute`)**
+## **3. Execution Logic (`fetchAndExecute`)**
 
 * **Fetch**: The CPU reads a full 40 bits from the main `DelayLineMemory` to fetch one instruction.
 * **Decode**: The fetched 40-bit `BigInt` is parsed to extract the 8-bit opcode and the 32-bit operand.
@@ -33,7 +33,7 @@ The built-in assembler, located within the `runSimulation` function, has been up
     * `SHR` (Shift Right): A right shift is more complex for a simple delay line. The CPU uses the internal scratch register (`regS`) to first read and temporarily store all bits from `regA`. It then clears `regA`, shifts in a `0`, and writes the bits from `regS` back into `regA`, effectively reversing their order to simulate a right shift. This demonstrates a clever workaround for a hardware limitation.
     * `PRA` (Print A): The logic for printing a signed number appears to contain a bug or an artifact from the previous 8-bit version. It checks the 8th bit (`valA & 0x80`) to determine if the number is negative, which is incorrect for a 40-bit value. For small positive numbers, this will work, but it will fail to correctly print large or negative 40-bit numbers.
 
-#### **4. Analysis of the Example Program**
+## **4. Analysis of the Example Program**
 
 The example program provided in `runSimulation` demonstrates the use of the new instructions.
 
