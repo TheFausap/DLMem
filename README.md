@@ -5,6 +5,7 @@
 * **40-bit Word Size**: The `WORD_SIZE` constant has been increased from 8 to 40. All registers (`regA`, `regB`, `regS`) and memory words are now 40 bits long.
 * **Program Memory**: The program memory (256W) is separated from the data memory.
 * **Data Memory**: 16 banks of 16W of external memory
+* **Data alignment**: BigEndian
 * **Instruction Format**: Despite the larger word size, the instruction format retains a familiar structure. An instruction is a 40-bit word where:
     * The **Opcode** occupies the 8 most significant bits.
     * The **Operand** space consists of the remaining 32 bits. This provides a large range for immediate values or memory addresses.
@@ -46,7 +47,7 @@ The example program provided in `runSimulation` demonstrates the use of the new 
 5.  `LAI, 99` / `STO, 0, 2`: Loads `99` into `regA` and stores it at bank 0, word 2.
 6.  `LDA, 0, 1` / `PRA`: Loads `13` back into `regA` and prints it. **Output: `13`**.
 7.  `LDA, 0, 2`: Loads `99` back into `regA`.
-8.  `SHL`: Shifts `regA` left by one bit. The value `99` (`0b1100011`) becomes `198` (`0b11000110`).
+8.  `SHL`: Shifts `regA` left by one bit. The value `99` (`0b1100011`) becomes `49` (`0b11000110`). The shift moves regardless the endiannes
 9.  `PRA`: Prints the new value of `regA`. **Output: `198`**.
 10. `HLT`: Halts the simulation.
 
