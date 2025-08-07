@@ -87,15 +87,19 @@ class SimpleCPU {
         this.regB = new DelayLineMemory(WORD_SIZE);
         this.regS = new DelayLineMemory(WORD_SIZE); // internal register as scratch space
         this.OPCODES = {
+            'NOP': 0b00000000, // No Operation
             'LAI': 0b00000001, // Load Immediate Value
             'LBI': 0b00000010,
             'ADD': 0b00000011,
             'PRA': 0b00000100,
             'NEG': 0b00000101,
             'STO': 0b00000110, // Store Reg A to Memory
+            'STC': 0b00010000, // Store Reg A to Memory and clear Reg A
             'LDA': 0b00000111, // Load Reg A from Memory
             'SHL': 0b00001000, // Shift Left A
             'SHR': 0b00001001, // Shift Right A
+            'RND': 0b00001010, // Random Number
+            'MLA': 0b00001011, // Multiply Accumulator
             'HLT': 0b00001111,
         };
 
@@ -144,6 +148,7 @@ class SimpleCPU {
 
             case this.OPCODES.STO:
             case this.OPCODES.LDA:
+            case this.OPCODES.STC:
                 const bankId = Number(operand >> 4n);
                 const wordId = Number(operand & 0x0Fn);
                 const targetBank = this.dataMemory.banks[bankId];
@@ -165,6 +170,14 @@ class SimpleCPU {
                         targetBank.tick();
                         this.regA.tick();
                     }
+                } else if(opcode === this.OPCODES.STC) {
+                    console.log("      -> Storing Reg A to Memory and clearing Reg A... (8 ticks)");
+                    for(let i=0; i<WORD_SIZE; i++) {
+                        targetBank.write(this.regA._memory[0]);
+                        targetBank.tick();
+                        this.regA.write(0); // Clear Reg A
+                        this.regA.tick();
+                    }
                 } else { // LDA
                     console.log("      -> Loading Memory to Reg A... (8 ticks)");
                     for(let i=0; i<WORD_SIZE; i++) {
@@ -173,9 +186,7 @@ class SimpleCPU {
                         targetBank.tick();
                     }
                 }
-
                 this.dataMemoryClocks[bankId] = (this.dataMemoryClocks[bankId] + 1) % this.dataMemory.wordsPerBank;
-
                 break;
 
             case this.OPCODES.SHL:
@@ -203,6 +214,38 @@ class SimpleCPU {
                 for (let i = 0; i < WORD_SIZE - 1; i++) {
                     this.regA.write(this.regS.tick());
                     this.regA.tick();
+                }
+                break;
+
+            case this.OPCODES.RND:
+                const bitsToClear = Number(operand);
+                console.log(`      -> ROUNDA, ${bitsToClear} (${WORD_SIZE} ticks)`);
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    const currentBit = this.regA._memory[0];
+                    // For the N least significant bits, write 0. Otherwise, refresh the bit.
+                    if (i < bitsToClear) {
+                        this.regA.write(0);
+                    } else {
+                        this.regA.write(currentBit);
+                    }
+                    this.regA.tick();
+                }
+                break;
+
+            case this.OPCODES.MLA:
+                const loopCount = Number(operand);
+                console.log(`      -> MULADD, ${loopCount} (${WORD_SIZE * loopCount} ticks)`);
+                for (let j = 0; j < loopCount; j++) {
+                    let carry = 0;
+                    for (let i = 0; i < WORD_SIZE; i++) {
+                        const bitA = this.regA._memory[0];
+                        const bitB = this.regB._memory[0];
+                        const sum = bitA + bitB + carry;
+                        this.regA.write(sum % 2);
+                        carry = sum > 1 ? 1 : 0;
+                        this.regA.tick();
+                        this.regB.tick();
+                    }
                 }
                 break;
 
@@ -261,6 +304,14 @@ class SimpleCPU {
                 console.log("\n--- HALT ---");
                 return false; // Stop execution
 
+            case this.OPCODES.NOP:
+                console.log("      -> NOP (No Operation, 8 ticks)");
+                // No operation, just consume the ticks
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    this.memory.tick();
+                }
+                break;
+                
             default:
                 console.error(`\n! EXECUTION ERROR: Unknown Opcode ${opcode}`);
                 this.state = 'HALTED';
@@ -333,6 +384,8 @@ function runSimulation() {
         switch (op) {
             case 'LAI':
             case 'LBI':
+            case 'RND':
+            case 'MLA':
                 instructionWord = opcode << BigInt(WORD_SIZE-8) | operand;
                 break;
             case 'STO':

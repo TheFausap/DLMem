@@ -374,50 +374,95 @@ class SimpleCPU {
                 break;
             
             case this.OPCODES.MUL:
-                console.log("      -> MUL (A * B), result in A");
-                // 1. INITIALIZATION
-                // Copy the multiplicand from Reg A into the internal scratch register S.
+                console.log("      -> MUL (Booth's Algorithm for Signed Multiplication)");
+
+                // --- BOOTH'S ALGORITHM SETUP ---
+
+                // 1. Copy Multiplicand from Reg A to scratch Reg S. Reg B is the Multiplier.
                 for (let i = 0; i < WORD_SIZE; i++) {
                     this.regS.write(this.regA.tick());
                     this.regS.tick();
                 }
 
-                // Reg B already contains the multiplier.
-                // Clear Reg A to serve as the product accumulator.
-                this.regA.clear();
-            
-                // 2. MAIN LOOP
-                // Loop once for each bit of the multiplier.
+                // 2. Compute the two's complement of the multiplicand (-M) and store it in Reg T.
+                //    First, invert the bits of S and store in T, while rotating S to preserve it.
                 for (let i = 0; i < WORD_SIZE; i++) {
-                    this.regA.tick();
-                    //console.log(` Reg A after rotation in: ${this.regA._memory.join('')}`);
-
-                    // 2b. Check the Most Significant Bit (MSB) of the multiplier in Reg B.
-                    // If the MSB is 1, add the multiplicand (from Reg S) to the product (Reg A).
-                    if (this.regB._memory[0] === 1) {                        
-                        // This is a custom ADD logic (A = A + S) that does NOT consume Reg S.
-                        let carry = 0;
-                        for (let j = 0; j < WORD_SIZE; j++) {
-                            const bitA = this.regA._memory[0];
-                            const bitS = this.regS._memory[0]; // Read from the static copy
-                            const sum = bitA + bitS + carry;
-                            this.regA.write(sum % 2);
-                            carry = sum > 1 ? 1 : 0;
-                            this.regA.tick(); // Rotate Reg A to complete the serial addition
-                            this.regS.tick(); // Rotate Reg S to complete the serial addition
-                            this.totalTicks++;
-                        }
-                        //console.log(`  Reg A after addition: ${this.regA._memory.join('')}`);
-                    }
-
-                    // 2c. Shift the multiplier (Reg B) one bit to the left.
-                    this.regB.write(0);
-                    this.regB.tick();
+                    this.regT.write(this.regS._memory[0] === 1 ? 0 : 1);
+                    this.regT.tick();
+                    this.regS.tick(); // Keep S aligned
+                }
+                //    Second, add 1 to T to complete the negation.
+                let negCarry = 1;
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    const sum = this.regT._memory[0] + negCarry;
+                    this.regT.write(sum % 2);
+                    negCarry = sum > 1 ? 1 : 0;
+                    this.regT.tick();
                 }
 
-                // The final 40-bit product is now in Reg A.
-                this.regA.tick(); // Final tick to ensure Reg A is updated
-                console.log(` Reg A after MUL: ${this.regA._memory.join('')}`);
+                // 3. Clear the Accumulator (Reg A).
+                this.regA.clear();
+
+                // 4. Initialize Q-1 (the bit to the "right" of the multiplier) to 0.
+                let q_minus_1 = 0;
+
+                // --- BOOTH'S ALGORITHM MAIN LOOP ---
+                for (let i = 0; i < WORD_SIZE; i++) {
+                    const q_0 = this.regB._memory[0]; // Current LSB of the multiplier
+
+                    // Step 1: Check the bit pair [Q0, Q-1] and decide to add, subtract, or do nothing.
+                    if (q_0 === 0 && q_minus_1 === 1) {
+                        // Pair is 01: Beginning of a block of 1s. Add M (A = A + S).
+                        let addCarry = 0;
+                        for (let j = 0; j < WORD_SIZE; j++) {
+                            const bitA = this.regA._memory[0];
+                            const bitS = this.regS._memory[0];
+                            const sum = bitA + bitS + addCarry;
+                            this.regA.write(sum % 2);
+                            addCarry = sum > 1 ? 1 : 0;
+                            this.regA.tick();
+                            this.regS.tick(); // Rotate S to preserve it
+                            this.totalTicks++;
+                        }
+                    } else if (q_0 === 1 && q_minus_1 === 0) {
+                        // Pair is 10: End of a block of 1s. Subtract M (A = A + (-M) -> A = A + T).
+                        let subCarry = 0;
+                        for (let j = 0; j < WORD_SIZE; j++) {
+                            const bitA = this.regA._memory[0];
+                            const bitT = this.regT._memory[0];
+                            const sum = bitA + bitT + subCarry;
+                            this.regA.write(sum % 2);
+                            subCarry = sum > 1 ? 1 : 0;
+                            this.regA.tick();
+                            this.regT.tick(); // Rotate T to preserve it
+                            this.totalTicks++;
+                        }
+                    }
+                    // If the pair is 00 or 11, do nothing to the accumulator.
+
+                    // Step 2: Perform an Arithmetic Right Shift on the combined [A, B] registers.
+                    const signBitA = this.regA._memory[WORD_SIZE - 1]; // Get MSB of A for arithmetic shift
+                    const lsbA = this.regA._memory[0];             // Get LSB of A to shift into B
+                    q_minus_1 = this.regB._memory[0];              // The new Q-1 is the outgoing LSB of B
+
+                    this.regA.write(signBitA); // Shift A right, preserving the sign bit
+                    this.regA.tick();
+
+                    this.regB.write(lsbA);     // Shift B right, bringing in the old LSB from A
+                    this.regB.tick();
+                    this.totalTicks += 2; // Account for the two ticks in the shift
+                }
+
+                // --- FINALIZATION ---
+                // The 80-bit result is now in [Reg A (High bits), Reg B (Low bits)].
+                // For compatibility with the PRA instruction (which prints Reg A),
+                // we will copy the low-order bits from B into A.
+                for(let i=0; i<WORD_SIZE; i++) {
+                    this.regA.write(this.regB.tick());
+                    this.regA.tick();
+                }
+
+                console.log(` Reg A after Booth's MUL (low part): ${this.regA._memory.join('')}`);
                 break;
 
             case this.OPCODES.RND:
@@ -761,14 +806,17 @@ function runSimulation(program) {
 
 // Program with a label for an infinite loop
 const program = `
-    ; Goal: Calculate 9 * 5 = 45.
-
-    LBI, 121                 ; Load multiplier into Reg B.
-    LAI, 6                 ; Load multiplicand into Reg A.
-
-    MUL                    ; A = A * B. The CPU handles all the complex steps.
-
-    PRA                    ; Print the result from Reg A.
+; MUL test.
+MULTST:
+    ; Load A
+    LAI 6       
+    ; Load B
+    LBI 6
+    ;NEG       
+    
+    MUL         ; Multiply A by B and store in A
+    
+    PRA
     HLT
 `;
 
